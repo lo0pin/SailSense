@@ -1,0 +1,250 @@
+from pathlib import Path
+
+import yaml
+
+
+SETTINGS_PATH = Path("/home/user/sailsense/config/settings.yaml")
+
+TIMEOUT_OPTIONS = [15.0, 30.0, 60.0, 120.0, 0.0]
+CONTRAST_OPTIONS = [32, 128, 255]
+
+SETTINGS_ITEMS = [
+    ("key_clicks", "Tastenton"),
+    ("signals", "Signale"),
+    ("timeout", "Timeout"),
+    ("invert", "Invert"),
+    ("contrast", "Kontrast"),
+    ("heartbeat", "LED Beat"),
+]
+
+
+def _bool_text(value):
+    return "an" if value else "aus"
+
+
+def _timeout_text(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        value = 60.0
+
+    if value <= 0:
+        return "immer"
+
+    return f"{int(value)}s"
+
+
+def _contrast_text(value):
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        value = 128
+
+    if value <= 32:
+        return "niedrig"
+
+    if value >= 255:
+        return "hoch"
+
+    return "mittel"
+
+
+def _read_yaml():
+    if not SETTINGS_PATH.exists():
+        return {}
+
+    data = yaml.safe_load(SETTINGS_PATH.read_text()) or {}
+    return data
+
+
+def _write_yaml(data):
+    SETTINGS_PATH.write_text(
+        yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+    )
+
+
+def _save_nested(section, key, value):
+    data = _read_yaml()
+    data.setdefault(section, {})
+    data[section][key] = value
+    _write_yaml(data)
+
+
+def _next_in_list(options, current):
+    try:
+        index = options.index(current)
+    except ValueError:
+        index = 0
+
+    return options[(index + 1) % len(options)]
+
+
+def init_runtime_settings(state, config):
+    oled_config = config.get("oled", {})
+    buzzer_config = config.get("buzzer", {})
+    led_config = config.get("status_led", {})
+
+    state.settings_menu_index = 0
+
+    state.buzzer_key_clicks = bool(buzzer_config.get("key_clicks", False))
+    state.buzzer_signals = bool(buzzer_config.get("signals", True))
+
+    state.oled_timeout_seconds = float(oled_config.get("timeout_seconds", 60))
+    state.oled_inverted = bool(oled_config.get("inverted", False))
+    state.oled_contrast = int(oled_config.get("contrast", 128))
+
+    state.led_heartbeat_enabled = bool(led_config.get("heartbeat_enabled", True))
+
+
+def ensure_settings_defaults():
+    data = _read_yaml()
+
+    data.setdefault("buzzer", {})
+    data["buzzer"].setdefault("key_clicks", False)
+    data["buzzer"].setdefault("signals", True)
+    data["buzzer"].setdefault("alarm_enabled", True)
+
+    data.setdefault("oled", {})
+    data["oled"].setdefault("timeout_seconds", 60)
+    data["oled"].setdefault("inverted", False)
+    data["oled"].setdefault("contrast", 128)
+
+    data.setdefault("status_led", {})
+    data["status_led"].setdefault("heartbeat_enabled", True)
+
+    _write_yaml(data)
+
+
+def _setting_value_text(state, key):
+    if key == "key_clicks":
+        return _bool_text(getattr(state, "buzzer_key_clicks", False))
+
+    if key == "signals":
+        return _bool_text(getattr(state, "buzzer_signals", True))
+
+    if key == "timeout":
+        return _timeout_text(getattr(state, "oled_timeout_seconds", 60))
+
+    if key == "invert":
+        return _bool_text(getattr(state, "oled_inverted", False))
+
+    if key == "contrast":
+        return _contrast_text(getattr(state, "oled_contrast", 128))
+
+    if key == "heartbeat":
+        return _bool_text(getattr(state, "led_heartbeat_enabled", True))
+
+    return "--"
+
+
+def render_settings_menu(oled, state):
+    index = getattr(state, "settings_menu_index", 0)
+
+    if index < 0:
+        index = 0
+
+    if index >= len(SETTINGS_ITEMS):
+        index = len(SETTINGS_ITEMS) - 1
+
+    state.settings_menu_index = index
+
+    # 128x64: lieber scrollen als alles reinquetschen
+    start = max(0, min(index - 2, len(SETTINGS_ITEMS) - 5))
+    end = min(len(SETTINGS_ITEMS), start + 5)
+
+    lines = []
+
+    for item_index in range(start, end):
+        key, label = SETTINGS_ITEMS[item_index]
+        prefix = ">" if item_index == index else " "
+        value = _setting_value_text(state, key)
+        lines.append(f"{prefix}{label}: {value}"[:21])
+
+    lines.append("OK:aendern BACK")
+
+    oled.show_status("Settings", lines)
+
+
+def _call_device_method(oled, method_name, value):
+    candidates = [oled]
+
+    for attr in ("display", "oled", "device", "_display"):
+        obj = getattr(oled, attr, None)
+        if obj is not None:
+            candidates.append(obj)
+
+    for obj in candidates:
+        method = getattr(obj, method_name, None)
+
+        if callable(method):
+            try:
+                method(value)
+                return True
+            except Exception:
+                pass
+
+    return False
+
+
+def apply_oled_runtime_settings(oled, state):
+    inverted = bool(getattr(state, "oled_inverted", False))
+    contrast = int(getattr(state, "oled_contrast", 128))
+
+    _call_device_method(oled, "invert", inverted)
+    _call_device_method(oled, "contrast", contrast)
+
+
+def _apply_buzzer_signals(buzzer, enabled):
+    if buzzer is None:
+        return
+
+    try:
+        buzzer.signals_enabled = bool(enabled)
+    except Exception:
+        pass
+
+
+def change_current_setting(state, oled=None, buzzer=None, led=None):
+    index = getattr(state, "settings_menu_index", 0)
+    key, _label = SETTINGS_ITEMS[index]
+
+    if key == "key_clicks":
+        state.buzzer_key_clicks = not bool(getattr(state, "buzzer_key_clicks", False))
+        _save_nested("buzzer", "key_clicks", bool(state.buzzer_key_clicks))
+
+    elif key == "signals":
+        state.buzzer_signals = not bool(getattr(state, "buzzer_signals", True))
+        _save_nested("buzzer", "signals", bool(state.buzzer_signals))
+        _apply_buzzer_signals(buzzer, state.buzzer_signals)
+
+    elif key == "timeout":
+        current = float(getattr(state, "oled_timeout_seconds", 60))
+        new_value = _next_in_list(TIMEOUT_OPTIONS, current)
+        state.oled_timeout_seconds = float(new_value)
+        _save_nested("oled", "timeout_seconds", float(new_value))
+
+    elif key == "invert":
+        state.oled_inverted = not bool(getattr(state, "oled_inverted", False))
+        _save_nested("oled", "inverted", bool(state.oled_inverted))
+
+        if oled is not None:
+            apply_oled_runtime_settings(oled, state)
+
+    elif key == "contrast":
+        current = int(getattr(state, "oled_contrast", 128))
+        new_value = _next_in_list(CONTRAST_OPTIONS, current)
+        state.oled_contrast = int(new_value)
+        _save_nested("oled", "contrast", int(new_value))
+
+        if oled is not None:
+            apply_oled_runtime_settings(oled, state)
+
+    elif key == "heartbeat":
+        state.led_heartbeat_enabled = not bool(
+            getattr(state, "led_heartbeat_enabled", True)
+        )
+        _save_nested(
+            "status_led",
+            "heartbeat_enabled",
+            bool(state.led_heartbeat_enabled),
+        )

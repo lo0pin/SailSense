@@ -1,0 +1,113 @@
+gps:
+  port: /dev/ttyACM0
+  baudrate: 9600
+  enabled: true
+bme280:
+  enabled: true
+  i2c_address: 118
+  read_interval_seconds: 10
+oled:
+  enabled: true
+  i2c_address: 60
+  width: 128
+  height: 64
+  update_interval_seconds: 2
+  timeout_seconds: 30.0
+  wake_on_button: true
+  inverted: false
+  contrast: 128
+imu:
+  enabled: false
+  i2c_address: 104
+  read_interval_seconds: 1
+logging:
+  gps_interval_seconds: 1
+  combined_interval_seconds: 1
+  flush_after_write: true
+  log_base_dir: /home/user/sailsense/logs
+export:
+  gpx_output_dir: /home/user/sailsense/data/exports
+buttons:
+  enabled: true
+  bounce_time_seconds: 0.05
+  hold_time_seconds: 2.0
+  pins:
+    up: 17
+    down: 27
+    ok: 22
+    back: 23
+barograph:
+  enabled: true
+  history_hours: 24
+  sample_interval_minutes: 15
+  min_display_range_hpa: 10
+  midline_mode: rolling_24h_mean
+  manual_reference_hpa: 1013
+  gps_norm_reference_hpa: null
+  show_min_max: true
+  show_delta_1h: true
+  show_delta_3h: true
+  show_delta_24h: true
+status_led:
+  enabled: true
+  type: rgb
+  common: anode
+  pins:
+    red: 5
+    green: 6
+    blue: 13
+  brightness:
+    red: 1.0
+    green: 1.0
+    blue: 1.0
+  test_delay_seconds: 1.0
+  heartbeat_interval_seconds: 20
+  heartbeat_on_seconds: 0.15
+  heartbeat_enabled: true
+weather_service:
+  enabled: true
+  raw_read_interval_seconds: 10
+  display_average_seconds: 60
+  storage_interval_minutes: 15
+  history_hours: 24
+  history_points: 96
+track:
+  enabled: true
+  point_interval_seconds: 5
+  min_sats: 5
+  max_hdop: 5.0
+  log_dir: /home/user/sailsense/logs/tracks
+  index_file: /home/user/sailsense/logs/tracks/tracks_index.csv
+buzzer:
+  enabled: true
+  pin: 12
+  kind: passive
+  active_high: true
+  key_clicks: false
+  volume: 0.18
+  passive_frequency: 1800
+  frequencies:
+    click: 1600
+    ok: 1700
+    marker: 1900
+    track_start: 1500
+    track_stop: 1200
+    warning: 1400
+    error: 900
+    alarm: 2600
+  signals: true
+  alarm_enabled: true
+anchor_watch:
+  enabled: true
+  radius_m: 20.0
+  buffer_m: 4.0
+  min_radius_m: 20.0
+  warn_ratio: 0.9
+  danger_ratio: 1.0
+  required_outside_seconds: 30.0
+  required_outside_points: 5
+  min_sats: 5
+  max_hdop: 5.0
+  alarm_repeat_seconds: 3.0
+  radius_step_m: 1.0
+  buffer_step_m: 1.0

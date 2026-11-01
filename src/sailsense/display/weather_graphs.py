@@ -1,0 +1,308 @@
+def _float_or_none(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _history_values(history, key):
+    values = []
+
+    for row in history or []:
+        value = _float_or_none(row.get(key))
+        if value is not None:
+            values.append(value)
+
+    return values
+
+
+def _delta(values, intervals):
+    if len(values) <= intervals:
+        return None
+
+    return values[-1] - values[-1 - intervals]
+
+
+def _fmt_delta(value, digits=1, suffix=""):
+    if value is None:
+        return "--"
+
+    sign = "+" if value >= 0 else ""
+    return f"{sign}{value:.{digits}f}{suffix}"
+
+
+def _fmt_value(value, digits=1, suffix=""):
+    if value is None:
+        return "--"
+
+    return f"{value:.{digits}f}{suffix}"
+
+
+def _pressure_trend(delta_1h, delta_3h):
+    value = delta_3h if delta_3h is not None else delta_1h
+
+    if value is None:
+        return "Trend: neu"
+
+    if value <= -1.0:
+        return "Trend: Druck fallt"
+
+    if value >= 1.0:
+        return "Trend: Druck steigt"
+
+    return "Trend: stabil"
+
+
+def render_weather_overview(oled, history, current_weather):
+    temp = _float_or_none(current_weather.get("temp_c"))
+    humidity = _float_or_none(current_weather.get("humidity_pct"))
+    pressure = _float_or_none(current_weather.get("pressure_hpa"))
+
+    p_values = _history_values(history, "pressure_hpa")
+    t_values = _history_values(history, "temp_c")
+    h_values = _history_values(history, "humidity_pct")
+
+    dp_1h = _delta(p_values, 4)
+    dp_3h = _delta(p_values, 12)
+    dt_1h = _delta(t_values, 4)
+    dh_1h = _delta(h_values, 4)
+
+    oled.show_status(
+        "Meteo",
+        [
+            f"T:{_fmt_value(temp, 1, 'C')} H:{_fmt_value(humidity, 0, '%')}",
+            f"P:{_fmt_value(pressure, 1, 'hPa')}",
+            f"d1h P:{_fmt_delta(dp_1h, 1)}hPa",
+            f"d1h T:{_fmt_delta(dt_1h, 1)}C H:{_fmt_delta(dh_1h, 0)}%",
+            _pressure_trend(dp_1h, dp_3h),
+            "OK: 24h Graph",
+        ],
+    )
+
+
+def _fmt_scale(value):
+    value = float(value)
+
+    if value >= 1:
+        return f"{value:.1f}".rstrip("0").rstrip(".")
+
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def render_weather_graph(oled, history, current_weather, metric="pressure", config=None):
+    config = config or {}
+
+    metrics = {
+        "pressure": {
+            "key": "pressure_hpa",
+            "title": "Druck 24h",
+            "short": "P",
+            "unit": "hPa",
+            "digits": 1,
+            "min_range": float(config.get("min_display_range_hpa", 10)),
+            "threshold": 1.0,
+        },
+        "temp": {
+            "key": "temp_c",
+            "title": "Temp 24h",
+            "short": "T",
+            "unit": "C",
+            "digits": 1,
+            "min_range": float(config.get("min_display_range_temp_c", 5)),
+            "threshold": 1.0,
+        },
+        "humidity": {
+            "key": "humidity_pct",
+            "title": "Feuchte 24h",
+            "short": "H",
+            "unit": "%",
+            "digits": 0,
+            "min_range": float(config.get("min_display_range_humidity_pct", 20)),
+            "threshold": 5.0,
+        },
+    }
+
+    settings = metrics.get(metric, metrics["pressure"])
+    key = settings["key"]
+
+    points = _history_values(history, key)
+    current_value = _float_or_none(current_weather.get(key))
+
+    if not points and current_value is not None:
+        points = [current_value]
+
+    if not points:
+        oled.show_status(settings["title"], ["Noch keine", "Wetterdaten", "BACK"])
+        return
+
+    oled.draw.rectangle((0, 0, oled.width, oled.height), outline=0, fill=0)
+
+    min_value = min(points)
+    max_value = max(points)
+    avg_value = sum(points) / len(points)
+
+    display_value = current_value if current_value is not None else points[-1]
+
+    d1h = _delta(points, 4)
+    d3h = _delta(points, 12)
+
+    trend_source = d3h if d3h is not None else d1h
+    threshold = settings["threshold"]
+
+    if trend_source is None:
+        trend = "neu"
+    elif trend_source <= -threshold:
+        trend = "fall"
+    elif trend_source >= threshold:
+        trend = "steig"
+    else:
+        trend = "stab"
+
+    if metric == "pressure":
+        midline_mode = config.get("midline_mode", "rolling_24h_mean")
+        manual_reference = _float_or_none(config.get("manual_reference_hpa"))
+        gps_norm_reference = _float_or_none(config.get("gps_norm_reference_hpa"))
+
+        if midline_mode == "manual" and manual_reference is not None:
+            center = manual_reference
+            center_label = "M"
+        elif midline_mode == "gps_norm_now" and gps_norm_reference is not None:
+            center = gps_norm_reference
+            center_label = "N"
+        else:
+            # Automatik: Die Mittellinie bleibt der Mittelwert der sichtbaren 24 h.
+            center = avg_value
+            center_label = "A"
+    else:
+        center = avg_value
+        center_label = "A"
+
+    graph_x = 0
+    graph_y = 23
+    graph_w = min(96, oled.width - 30)
+    graph_h = oled.height - graph_y - 1
+
+    if graph_w < 40:
+        graph_w = min(96, oled.width)
+
+    if graph_h < 16:
+        graph_h = max(8, oled.height - graph_y - 1)
+
+    graph_right = graph_x + graph_w - 1
+    graph_bottom = graph_y + graph_h - 1
+    mid_y = graph_y + graph_h // 2
+
+    if metric == "pressure":
+        # Exakter Vertikalzoom: Jede Pixelzeile entspricht diesem Druckwert.
+        pressure_per_pixel = _float_or_none(
+            config.get("vertical_scale_hpa_per_pixel", 0.25)
+        )
+
+        if pressure_per_pixel is None or pressure_per_pixel <= 0:
+            pressure_per_pixel = 0.25
+
+        pixels_above = mid_y - graph_y
+        pixels_below = graph_bottom - mid_y
+        high = center + pixels_above * pressure_per_pixel
+        low = center - pixels_below * pressure_per_pixel
+        display_range = high - low
+    else:
+        max_deviation = max(abs(value - center) for value in points)
+        display_range = max(settings["min_range"], max_deviation * 2)
+        display_range += 1.0
+        low = center - display_range / 2
+        high = center + display_range / 2
+        pressure_per_pixel = None
+
+    short = settings["short"]
+    unit = settings["unit"]
+    digits = settings["digits"]
+
+    line1 = (
+        f"{short}{display_value:.{digits}f}{unit} "
+        f"mn{min_value:.0f} mx{max_value:.0f}"
+    )
+
+    if metric == "pressure":
+        scale_text = _fmt_scale(pressure_per_pixel)
+        line2 = f"{center_label}{center:.1f} 1px={scale_text}hPa"
+    else:
+        line2 = (
+            f"d1h{_fmt_delta(d1h, 1)} d3h{_fmt_delta(d3h, 1)} "
+            f"R{display_range:.0f} {trend}"
+        )
+
+    oled.draw.text((0, 0), line1[:22], font=oled.font, fill=255)
+    oled.draw.text((0, 10), line2[:22], font=oled.font, fill=255)
+
+    # Mittellinie gestrichelt
+    for x in range(graph_x, graph_x + graph_w):
+        if x % 2 == 0:
+            oled.draw.point((x, mid_y), fill=255)
+
+    # Zeitmarker bei -18h, -12h, -6h
+    for offset in (72, 48, 24):
+        x = graph_x + graph_w - 1 - offset
+
+        if graph_x <= x <= graph_right:
+            if graph_y <= mid_y - 1 <= graph_bottom:
+                oled.draw.point((x, mid_y - 1), fill=255)
+            if graph_y <= mid_y + 1 <= graph_bottom:
+                oled.draw.point((x, mid_y + 1), fill=255)
+
+    values_to_draw = points[-graph_w:]
+    plotted = []
+
+    for index, value in enumerate(values_to_draw):
+        x = graph_x + index
+
+        if metric == "pressure":
+            # Die Mittellinie ist y=mid_y; jede Abweichung wird exakt in
+            # hPa/Pixel umgerechnet. Werte ausserhalb des Fensters werden
+            # am Rand abgeschnitten, statt den Zoom heimlich zu veraendern.
+            y = mid_y - int(round((value - center) / pressure_per_pixel))
+            y = max(graph_y, min(graph_bottom, y))
+        elif high == low:
+            y = mid_y
+        else:
+            ratio = (value - low) / (high - low)
+            ratio = max(0.0, min(1.0, ratio))
+            y = graph_bottom - int(round(ratio * (graph_h - 1)))
+
+        plotted.append((x, y))
+        oled.draw.point((x, y), fill=255)
+
+    # letzten Punkt markieren
+    if plotted:
+        lx, ly = plotted[-1]
+        oled.draw.rectangle(
+            (
+                max(graph_x, lx - 1),
+                max(graph_y, ly - 1),
+                min(graph_right, lx + 1),
+                min(graph_bottom, ly + 1),
+            ),
+            outline=255,
+            fill=0,
+        )
+        oled.draw.point((lx, ly), fill=255)
+
+    # rechte Skala
+    scale_x = graph_x + graph_w + 3
+
+    if scale_x < oled.width - 20:
+        oled.draw.text((scale_x, graph_y), f"{high:.0f}", font=oled.font, fill=255)
+        oled.draw.text(
+            (scale_x, max(graph_y, mid_y - 4)),
+            f"{center_label}{center:.0f}",
+            font=oled.font,
+            fill=255,
+        )
+        oled.draw.text(
+            (scale_x, max(graph_y, graph_bottom - 8)),
+            f"{low:.0f}",
+            font=oled.font,
+            fill=255,
+        )
+
+    oled._show()
