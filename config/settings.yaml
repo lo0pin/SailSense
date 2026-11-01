@@ -12,10 +12,8 @@ oled:
   width: 128
   height: 64
   update_interval_seconds: 2
-  timeout_seconds: 30.0
+  timeout_seconds: 60
   wake_on_button: true
-  inverted: false
-  contrast: 32
 imu:
   enabled: false
   i2c_address: 104
@@ -42,8 +40,7 @@ barograph:
   sample_interval_minutes: 15
   min_display_range_hpa: 10
   midline_mode: rolling_24h_mean
-  manual_reference_hpa: 1013.0
-  vertical_scale_hpa_per_pixel: 0.25
+  manual_reference_hpa: 1013
   gps_norm_reference_hpa: null
   show_min_max: true
   show_delta_1h: true
@@ -64,10 +61,6 @@ status_led:
   test_delay_seconds: 1.0
   heartbeat_interval_seconds: 20
   heartbeat_on_seconds: 0.15
-  heartbeat_enabled: true
-flashlight:
-  enabled: true
-  default_color: white
 weather_service:
   enabled: true
   raw_read_interval_seconds: 10
@@ -98,21 +91,4 @@ buzzer:
     track_stop: 1200
     warning: 1400
     error: 900
-    alarm: 2800
-  signals: true
-  alarm_enabled: true
-  alarm_volume: 0.9
-anchor_watch:
-  enabled: true
-  radius_m: 13.08476892097751
-  buffer_m: 5.0
-  min_radius_m: 1.0
-  warn_ratio: 0.9
-  danger_ratio: 1.0
-  required_outside_seconds: 8.0
-  required_outside_points: 3
-  min_sats: 5
-  max_hdop: 5.0
-  alarm_repeat_seconds: 1.5
-  radius_step_m: 1.0
-  buffer_step_m: 1.0
+    alarm: 2600
